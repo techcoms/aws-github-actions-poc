@@ -1,0 +1,60 @@
+name: Auto Setup & Deploy to EC2
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Install & Deploy App on EC2
+        run: |
+          ssh ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
+            set -e
+
+            # Update OS
+            sudo yum update -y
+
+            # Install Git if missing
+            if ! command -v git &> /dev/null; then
+              sudo yum install -y git
+            fi
+
+            # Install Node.js if missing
+            if ! command -v node &> /dev/null; then
+              curl -fsSL https://rpm.nodesource.com/setup_18.x | sudo bash -
+              sudo yum install -y nodejs
+            fi
+
+            # Install PM2 if missing
+            if ! command -v pm2 &> /dev/null; then
+              sudo npm install -g pm2
+            fi
+
+            # Clone or update repo
+            if [ ! -d "aws-github-actions-poc" ]; then
+              git clone https://github.com/<YOUR_GITHUB_USERNAME>/aws-github-actions-poc.git
+            fi
+
+            cd aws-github-actions-poc
+
+            git pull origin main
+            npm install
+
+            # Start or restart app
+            pm2 restart ecosystem.config.js || pm2 start ecosystem.config.js
+            pm2 save
+          EOF
